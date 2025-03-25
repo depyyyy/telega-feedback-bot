@@ -47,37 +47,37 @@ class FeedbackStates(StatesGroup):
 
 
 # Функция автоматического закрытия тикета
-async def auto_close_ticket(ticket_id):
+async def auto_close_ticket(ticket_id: int) -> None:
     await asyncio.sleep(3600)  # Ждем 1 час (3600 секунд)
     if ticket_id in ticket_data:
         if ticket_id in ticket_queue:
             ticket_queue.remove(ticket_id)
-        user_id = ticket_data[ticket_id]["user_id"]
+        ticket_user_id = ticket_data[ticket_id]["user_id"]
         admin_id = ticket_data[ticket_id].get("assigned_admin")
         if admin_id and ticket_id in ADMIN_SETTINGS[admin_id]["ticket_history"]:
             ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["status"] = "автоматически закрыт"
         del ticket_data[ticket_id]
         try:
-            back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            auto_close_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
             ])
             await bot.send_message(
-                chat_id=user_id,
+                chat_id=ticket_user_id,
                 text=f"ℹ️ Тикет #{ticket_id} автоматически закрыт, так как не было активности в течение 1 часа.",
-                reply_markup=back_keyboard
+                reply_markup=auto_close_keyboard
             )
             if admin_id:
                 await bot.send_message(
                     chat_id=admin_id,
                     text=f"ℹ️ Тикет #{ticket_id} автоматически закрыт по истечении 1 часа."
                 )
-        except Exception as e:
-            logger.error(f"Ошибка при автоматическом закрытии тикета #{ticket_id}: {e}")
+        except Exception as exc:
+            logger.error(f"Ошибка при автоматическом закрытии тикета #{ticket_id}: {exc}")
 
 
 # Команда /start с инлайн-кнопками
 @dp.message(Command("start"))
-async def start_command(message: types.Message, state: FSMContext):
+async def start_command(message: types.Message, state: FSMContext) -> None:
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📩 Предложение", callback_data="suggestion")],
         [InlineKeyboardButton(text="💬 Отзыв о проекте", callback_data="feedback")],
@@ -90,7 +90,7 @@ async def start_command(message: types.Message, state: FSMContext):
 
 # Обработка возврата на главный экран
 @dp.callback_query(lambda c: c.data == "home")
-async def process_home(callback: types.CallbackQuery, state: FSMContext):
+async def process_home(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📩 Предложение", callback_data="suggestion")],
@@ -103,30 +103,30 @@ async def process_home(callback: types.CallbackQuery, state: FSMContext):
 
 # Обработка нажатий на инлайн-кнопки (основное меню)
 @dp.callback_query(lambda c: c.data in ["suggestion", "feedback", "check_queue"])
-async def process_callback(callback: types.CallbackQuery, state: FSMContext):
+async def process_callback(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.data == "check_queue":
         queue_size = len(ticket_queue)
-        back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        queue_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
         ])
         await callback.message.edit_text(
             f"Текущая очередь тикетов: {queue_size}. Ваш тикет будет обработан в порядке очереди.",
-            reply_markup=back_keyboard
+            reply_markup=queue_keyboard
         )
     else:
         feedback_type = callback.data
         await state.update_data(feedback_type=feedback_type)
-        back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        message_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
         ])
-        await callback.message.edit_text("✍️ Напишите ваше сообщение:", reply_markup=back_keyboard)
+        await callback.message.edit_text("✍️ Напишите ваше сообщение:", reply_markup=message_keyboard)
         await state.set_state(FeedbackStates.waiting_for_message)
 
 
 # Обработка текстовых сообщений от пользователей
 @dp.message(FeedbackStates.waiting_for_message)
-async def handle_message(message: types.Message, state: FSMContext):
+async def handle_message(message: types.Message, state: FSMContext) -> None:
     global ticket_counter
     ticket_counter += 1
     ticket_id = ticket_counter
@@ -134,7 +134,7 @@ async def handle_message(message: types.Message, state: FSMContext):
     ticket_data[ticket_id] = {
         "user_id": message.from_user.id,
         "message": message.text,
-        "type": message.text.lower().startswith("предложение") and "предложение" or "отзыв",
+        "type": "предложение" if message.text.lower().startswith("предложение") else "отзыв",
         "created_at": datetime.now(),
         "assigned_admin": None
     }
@@ -161,15 +161,15 @@ async def handle_message(message: types.Message, state: FSMContext):
                 reply_markup=admin_keyboard
             )
             logger.info(f"Сообщение отправлено администратору {admin_id}")
-        except Exception as e:
-            logger.error(f"Ошибка отправки администратору {admin_id}: {e}")
+        except Exception as exc:
+            logger.error(f"Ошибка отправки администратору {admin_id}: {exc}")
 
-    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    user_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
     ])
     await message.reply(
         f"✅ Ваше сообщение отправлено! Ваш тикет #{ticket_id}. Вы {queue_position}-й в очереди.",
-        reply_markup=back_keyboard
+        reply_markup=user_keyboard
     )
     await state.set_state(FeedbackStates.waiting_for_admin_assignment)
 
@@ -178,7 +178,7 @@ async def handle_message(message: types.Message, state: FSMContext):
 
 # Обработка выбора администратора
 @dp.callback_query(lambda c: c.data.startswith("assign_"))
-async def process_admin_assignment(callback: types.CallbackQuery, state: FSMContext):
+async def process_admin_assignment(callback: types.CallbackQuery, state: FSMContext) -> None:
     if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("У вас нет прав для этого действия.", show_alert=True)
         return
@@ -221,8 +221,8 @@ async def process_admin_assignment(callback: types.CallbackQuery, state: FSMCont
                 await bot.send_message(admin, admin_message, parse_mode="Markdown", reply_markup=admin_keyboard)
             else:
                 await bot.send_message(admin, f"ℹ️ Тикет #{ticket_id} взял в работу {ADMIN_IDS[admin_id]}.")
-        except Exception as e:
-            logger.error(f"Ошибка уведомления администратора {admin}: {e}")
+        except Exception as exc:
+            logger.error(f"Ошибка уведомления администратора {admin}: {exc}")
 
     await state.set_state(FeedbackStates.waiting_for_admin_response)
 
@@ -230,7 +230,7 @@ async def process_admin_assignment(callback: types.CallbackQuery, state: FSMCont
 # Обработка остальных кнопок администратора
 @dp.callback_query(
     lambda c: c.data.startswith("reply_") or c.data.startswith("admin_close_") or c.data.startswith("history_"))
-async def process_reply_callback(callback: types.CallbackQuery, state: FSMContext):
+async def process_reply_callback(callback: types.CallbackQuery, state: FSMContext) -> None:
     if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("У вас нет прав для этого действия.", show_alert=True)
         return
@@ -247,52 +247,49 @@ async def process_reply_callback(callback: types.CallbackQuery, state: FSMContex
     if action == "reply":
         if ticket_data[ticket_id]["assigned_admin"] != admin_id:
             await callback.answer("Этот тикет ведет другой администратор.", show_alert=True)
-
-
-economy
-return
-await state.update_data(ticket_id=ticket_id)
-await callback.message.reply("✍️ Напишите ваш ответ пользователю:")
-await state.set_state(FeedbackStates.waiting_for_admin_response)
-elif action == "admin_close":
-user_id = ticket_data[ticket_id]["user_id"]
-if ticket_id in ADMIN_SETTINGS[admin_id]["ticket_history"]:
-    ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["status"] = "закрыт администратором"
-if ticket_id in ticket_queue:
-    ticket_queue.remove(ticket_id)
-del ticket_data[ticket_id]
-back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
-])
-await callback.message.reply(f"✅ Тикет #{ticket_id} закрыт вами.")
-try:
-    await bot.send_message(
-        chat_id=user_id,
-        text=f"ℹ️ Тикет #{ticket_id} был закрыт администратором.",
-        reply_markup=back_keyboard
-    )
-except Exception as e:
-    logger.error(f"Ошибка уведомления пользователя о закрытии тикета #{ticket_id}: {e}")
-elif action == "history":
-if ticket_id not in ADMIN_SETTINGS[admin_id]["ticket_history"]:
-    await callback.message.reply("⚠️ У вас нет истории для этого тикета.")
-    return
-history = ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]
-history_text = f"📜 *История тикета #{ticket_id}*\n\n"
-history_text += f"👨‍💼 Администратор: {ADMIN_IDS[admin_id]}\n"
-history_text += f"📌 Статус: {history['status']}\n\n"
-history_text += "Сообщения:\n"
-for msg, sender, timestamp in history["messages"]:
-    history_text += f"[{timestamp}] {sender}: {msg}\n"
-back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
-])
-await callback.message.reply(history_text, parse_mode="Markdown", reply_markup=back_keyboard)
+            return
+        await state.update_data(ticket_id=ticket_id)
+        await callback.message.reply("✍️ Напишите ваш ответ пользователю:")
+        await state.set_state(FeedbackStates.waiting_for_admin_response)
+    elif action == "admin_close":
+        ticket_user_id = ticket_data[ticket_id]["user_id"]
+        if ticket_id in ADMIN_SETTINGS[admin_id]["ticket_history"]:
+            ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["status"] = "закрыт администратором"
+        if ticket_id in ticket_queue:
+            ticket_queue.remove(ticket_id)
+        del ticket_data[ticket_id]
+        close_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
+        ])
+        await callback.message.reply(f"✅ Тикет #{ticket_id} закрыт вами.")
+        try:
+            await bot.send_message(
+                chat_id=ticket_user_id,
+                text=f"ℹ️ Тикет #{ticket_id} был закрыт администратором.",
+                reply_markup=close_keyboard
+            )
+        except Exception as exc:
+            logger.error(f"Ошибка уведомления пользователя о закрытии тикета #{ticket_id}: {exc}")
+    elif action == "history":
+        if ticket_id not in ADMIN_SETTINGS[admin_id]["ticket_history"]:
+            await callback.message.reply("⚠️ У вас нет истории для этого тикета.")
+            return
+        history = ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]
+        history_text = f"📜 *История тикета #{ticket_id}*\n\n"
+        history_text += f"👨‍💼 Администратор: {ADMIN_IDS[admin_id]}\n"
+        history_text += f"📌 Статус: {history['status']}\n\n"
+        history_text += "Сообщения:\n"
+        for msg, sender, timestamp in history["messages"]:
+            history_text += f"[{timestamp}] {sender}: {msg}\n"
+        history_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
+        ])
+        await callback.message.reply(history_text, parse_mode="Markdown", reply_markup=history_keyboard)
 
 
 # Обработка ответа администратора
 @dp.message(lambda message: message.from_user.id in ADMIN_IDS)
-async def admin_reply(message: types.Message, state: FSMContext):
+async def admin_reply(message: types.Message, state: FSMContext) -> None:
     data = await state.get_data()
     ticket_id = data.get("ticket_id")
     admin_id = message.from_user.id
@@ -305,7 +302,7 @@ async def admin_reply(message: types.Message, state: FSMContext):
         return
 
     ticket = ticket_data[ticket_id]
-    user_id = ticket["user_id"]
+    ticket_user_id = ticket["user_id"]
     admin_response = message.text
     ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["messages"].append(
         (admin_response, f"админ {ADMIN_IDS[admin_id]}", datetime.now()))
@@ -317,29 +314,29 @@ async def admin_reply(message: types.Message, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
         ])
         await bot.send_message(
-            chat_id=user_id,
+            chat_id=ticket_user_id,
             text=f"📢 *Ответ на тикет #{ticket_id}:*\n\n{admin_response}\n\nЕсли остались вопросы, вы можете продолжить диалог.",
             parse_mode="Markdown",
             reply_markup=continue_keyboard
         )
         await message.reply(f"✅ Ответ на тикет #{ticket_id} отправлен пользователю!")
-    except Exception as e:
-        await message.reply(f"⚠️ Ошибка отправки ответа пользователю: {e}")
+    except Exception as exc:
+        await message.reply(f"⚠️ Ошибка отправки ответа пользователю: {exc}")
 
 
 # Обработка кнопки "Продолжить диалог" или "Закрыть тикет" пользователем
 @dp.callback_query(lambda c: c.data.startswith("continue_") or c.data.startswith("close_"))
-async def process_dialog_options(callback: types.CallbackQuery, state: FSMContext):
+async def process_dialog_options(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     action, ticket_id = callback.data.split("_", 1)
     ticket_id = int(ticket_id)
 
     if action == "continue":
         await state.update_data(prev_ticket_id=ticket_id)
-        back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        dialog_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
         ])
-        await callback.message.edit_text("✍️ Напишите ваше следующее сообщение:", reply_markup=back_keyboard)
+        await callback.message.edit_text("✍️ Напишите ваше следующее сообщение:", reply_markup=dialog_keyboard)
         await state.set_state(FeedbackStates.continuing_dialog)
     elif action == "close":
         if ticket_id in ticket_data:
@@ -349,25 +346,25 @@ async def process_dialog_options(callback: types.CallbackQuery, state: FSMContex
             if admin_id and ticket_id in ADMIN_SETTINGS[admin_id]["ticket_history"]:
                 ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["status"] = "закрыт пользователем"
             del ticket_data[ticket_id]
-            back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            close_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
             ])
             await callback.message.edit_text(
                 f"✅ Тикет #{ticket_id} закрыт. Если у вас появятся новые вопросы, используйте /start.",
-                reply_markup=back_keyboard
+                reply_markup=close_keyboard
             )
             if admin_id:
                 await bot.send_message(admin_id, f"ℹ️ Пользователь закрыл тикет #{ticket_id}.")
         else:
-            back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            error_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
             ])
-            await callback.message.edit_text("⚠️ Тикет уже закрыт или не существует.", reply_markup=back_keyboard)
+            await callback.message.edit_text("⚠️ Тикет уже закрыт или не существует.", reply_markup=error_keyboard)
 
 
 # Обработка продолжения диалога
 @dp.message(FeedbackStates.continuing_dialog)
-async def handle_continue_dialog(message: types.Message, state: FSMContext):
+async def handle_continue_dialog(message: types.Message, state: FSMContext) -> None:
     global ticket_counter
     data = await state.get_data()
     prev_ticket_id = data.get("prev_ticket_id")
@@ -412,15 +409,15 @@ async def handle_continue_dialog(message: types.Message, state: FSMContext):
                 reply_markup=admin_keyboard
             )
             logger.info(f"Сообщение отправлено администратору {assigned_admin}")
-        except Exception as e:
-            logger.error(f"Ошибка отправки администратору {assigned_admin}: {e}")
+        except Exception as exc:
+            logger.error(f"Ошибка отправки администратору {assigned_admin}: {exc}")
 
-    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    user_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
     ])
     await message.reply(
         f"✅ Ваше сообщение отправлено! Ваш тикет #{ticket_id}. Вы {queue_position}-й в очереди.",
-        reply_markup=back_keyboard
+        reply_markup=user_keyboard
     )
     await state.set_state(FeedbackStates.waiting_for_admin_response)
 
@@ -429,47 +426,47 @@ async def handle_continue_dialog(message: types.Message, state: FSMContext):
 
 # Команда для проверки Telegram ID
 @dp.message(Command("id"))
-async def get_id(message: types.Message):
+async def get_id(message: types.Message) -> None:
     await message.reply(f"Ваш Telegram ID: {message.from_user.id}")
 
 
 # Обработчик корневого пути для Render
-async def handle_root(request):
+async def handle_root(request: web.Request) -> web.Response:
     return web.Response(text="Telegram Feedback Bot is running!")
 
 
 # Обработчик Webhook
-async def handle_webhook(request):
+async def handle_webhook(request: web.Request) -> web.Response:
     update = await request.json()
     await dp.feed_update(bot, types.Update(**update))
     return web.Response()
 
 
 # Настройка Webhook
-async def on_startup(_):
+async def on_startup(_: web.Application) -> None:
     webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"
     try:
         await bot.set_webhook(url=webhook_url)
         logger.info(f"Webhook успешно установлен: {webhook_url}")
-    except Exception as e:
-        logger.error(f"Ошибка при установке Webhook: {e}")
+    except Exception as exc:
+        logger.error(f"Ошибка при установке Webhook: {exc}")
 
 
-async def on_shutdown(_):
+async def on_shutdown(_: web.Application) -> None:
     try:
         await bot.delete_webhook()
         logger.info("Webhook успешно удален")
-    except Exception as e:
-        logger.error(f"Ошибка при удалении Webhook: {e}")
+    except Exception as exc:
+        logger.error(f"Ошибка при удалении Webhook: {exc}")
     try:
         await bot.session.close()
         logger.info("Сессия бота закрыта")
-    except Exception as e:
-        logger.error(f"Ошибка при закрытии сессии бота: {e}")
+    except Exception as exc:
+        logger.error(f"Ошибка при закрытии сессии бота: {exc}")
 
 
 # Запуск приложения
-async def main():
+async def main() -> None:
     app = web.Application()
 
     # Добавляем обработчик корневого пути
