@@ -470,8 +470,7 @@ async def main() -> None:
     app = web.Application()
 
     # Добавляем обработчик корневого пути
-    app.router.add_get('/', handle_root)
-    app.router.add_head('/', handle_root)  # Добавляем поддержку HEAD-запросов
+    app.router.add_get('/', handle_root)  # Обрабатывает как GET, так и HEAD запросы
 
     # Настраиваем Webhook
     app.router.add_post(f"/webhook/{TOKEN}", handle_webhook)
