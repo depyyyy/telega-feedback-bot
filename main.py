@@ -415,25 +415,39 @@ async def handle_continue_dialog(message: types.Message, state: FSMContext):
 async def get_id(message: types.Message):
     await message.reply(f"Ваш Telegram ID: {message.from_user.id}")
 
-# Настройка Webhook
+# Настройка Webhook с дополнительным логированием
 async def on_startup(dispatcher: Dispatcher):
-    webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"  # Замените на ваш домен
-    await bot.set_webhook(url=webhook_url)
-    logger.info(f"Webhook установлен: {webhook_url}")
+    webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"
+    try:
+        await bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook успешно установлен: {webhook_url}")
+    except Exception as e:
+        logger.error(f"Ошибка при установке Webhook: {e}")
 
 async def on_shutdown(dispatcher: Dispatcher):
-    await bot.delete_webhook()
-    await bot.session.close()
-    logger.info("Webhook удален, сессия закрыта")
+    try:
+        await bot.delete_webhook()
+        logger.info("Webhook успешно удален")
+    except Exception as e:
+        logger.error(f"Ошибка при удалении Webhook: {e}")
+    try:
+        await bot.session.close()
+        logger.info("Сессия бота закрыта")
+    except Exception as e:
+        logger.error(f"Ошибка при закрытии сессии бота: {e}")
 
 # Запуск приложения
 def main():
     app = web.Application()
+    # Регистрируем обработчик Webhook
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=f"/webhook/{TOKEN}")
     setup_application(app, dp, bot=bot)
+    # Регистрируем функции startup и shutdown
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
+    # Запускаем веб-сервер на порту 8080
     web.run_app(app, host="0.0.0.0", port=8080)
 
 if __name__ == "__main__":
+    logger.info("Запуск бота...")
     main()
