@@ -8,17 +8,19 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 # Токен бота
 TOKEN = "7712233610:AAG-M040klfJ8QOscBEjT8pBHqus4J58BuI"
 
 # Список администраторов
-ADMIN_IDS = {1180484154: "Денис", 723748072: "Федя", 864561515: "Таня"}  # Словарь: {ID: "Имя"}
+ADMIN_IDS = {1180484154: "Денис", 723748072: "Федя", 864561515: "Таня"}
 
-# Настройки администраторов (без бан-листа)
+# Настройки администраторов
 ADMIN_SETTINGS = {
     admin_id: {
-        "ticket_history": {}  # История тикетов для каждого админа
+        "ticket_history": {}
     } for admin_id in ADMIN_IDS
 }
 
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Инициализируем бота, диспетчер и хранилище
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+dp = Dispatcher(bot=bot, storage=storage)
 
 # Очередь тикетов
 ticket_queue = deque()
@@ -134,7 +136,6 @@ async def handle_message(message: types.Message, state: FSMContext):
 
     queue_position = len(ticket_queue)
 
-    # Генерируем кнопки с именами администраторов
     admin_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"Взять тикет ({ADMIN_IDS[admin_id]})", callback_data=f"assign_{ticket_id}_{admin_id}") for admin_id in ADMIN_IDS]
     ])
@@ -189,7 +190,6 @@ async def process_admin_assignment(callback: types.CallbackQuery, state: FSMCont
         return
 
     ticket_data[ticket_id]["assigned_admin"] = admin_id
-    # Добавляем тикет в историю выбранного администратора
     ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id] = {
         "user_id": ticket_data[ticket_id]["user_id"],
         "messages": [(ticket_data[ticket_id]["message"], "пользователь", datetime.now())],
@@ -415,10 +415,25 @@ async def handle_continue_dialog(message: types.Message, state: FSMContext):
 async def get_id(message: types.Message):
     await message.reply(f"Ваш Telegram ID: {message.from_user.id}")
 
-# Запуск бота
-async def main():
-    logger.info("Бот запущен и работает...")
-    await dp.start_polling(bot)
+# Настройка Webhook
+async def on_startup(dispatcher: Dispatcher):
+    webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"  # Замените на ваш домен
+    await bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook установлен: {webhook_url}")
+
+async def on_shutdown(dispatcher: Dispatcher):
+    await bot.delete_webhook()
+    await bot.session.close()
+    logger.info("Webhook удален, сессия закрыта")
+
+# Запуск приложения
+def main():
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=f"/webhook/{TOKEN}")
+    setup_application(app, dp, bot=bot)
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+    web.run_app(app, host="0.0.0.0", port=8080)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
