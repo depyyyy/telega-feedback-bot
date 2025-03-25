@@ -8,7 +8,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
 # Токен бота
@@ -38,12 +37,14 @@ ticket_queue = deque()
 ticket_counter = 0
 ticket_data = {}
 
+
 # Определяем состояния FSM
 class FeedbackStates(StatesGroup):
     waiting_for_message = State()
     waiting_for_admin_response = State()
     continuing_dialog = State()
     waiting_for_admin_assignment = State()
+
 
 # Функция автоматического закрытия тикета
 async def auto_close_ticket(ticket_id):
@@ -73,6 +74,7 @@ async def auto_close_ticket(ticket_id):
         except Exception as e:
             logger.error(f"Ошибка при автоматическом закрытии тикета #{ticket_id}: {e}")
 
+
 # Команда /start с инлайн-кнопками
 @dp.message(Command("start"))
 async def start_command(message: types.Message, state: FSMContext):
@@ -85,6 +87,7 @@ async def start_command(message: types.Message, state: FSMContext):
     await state.clear()
     logger.info(f"Отправлено приветствие пользователю {message.from_user.first_name} ({message.from_user.id})")
 
+
 # Обработка возврата на главный экран
 @dp.callback_query(lambda c: c.data == "home")
 async def process_home(callback: types.CallbackQuery, state: FSMContext):
@@ -96,6 +99,7 @@ async def process_home(callback: types.CallbackQuery, state: FSMContext):
     ])
     await callback.message.edit_text("Привет! Этот бот принимает сообщения. Выберите действие:", reply_markup=keyboard)
     await state.clear()
+
 
 # Обработка нажатий на инлайн-кнопки (основное меню)
 @dp.callback_query(lambda c: c.data in ["suggestion", "feedback", "check_queue"])
@@ -119,6 +123,7 @@ async def process_callback(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("✍️ Напишите ваше сообщение:", reply_markup=back_keyboard)
         await state.set_state(FeedbackStates.waiting_for_message)
 
+
 # Обработка текстовых сообщений от пользователей
 @dp.message(FeedbackStates.waiting_for_message)
 async def handle_message(message: types.Message, state: FSMContext):
@@ -137,7 +142,8 @@ async def handle_message(message: types.Message, state: FSMContext):
     queue_position = len(ticket_queue)
 
     admin_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Взять тикет ({ADMIN_IDS[admin_id]})", callback_data=f"assign_{ticket_id}_{admin_id}") for admin_id in ADMIN_IDS]
+        [InlineKeyboardButton(text=f"Взять тикет ({ADMIN_IDS[admin_id]})",
+                              callback_data=f"assign_{ticket_id}_{admin_id}") for admin_id in ADMIN_IDS]
     ])
     admin_message = (
         f"📩 *Новая заявка #{ticket_id}*\n\n"
@@ -168,6 +174,7 @@ async def handle_message(message: types.Message, state: FSMContext):
     await state.set_state(FeedbackStates.waiting_for_admin_assignment)
 
     asyncio.create_task(auto_close_ticket(ticket_id))
+
 
 # Обработка выбора администратора
 @dp.callback_query(lambda c: c.data.startswith("assign_"))
@@ -219,8 +226,10 @@ async def process_admin_assignment(callback: types.CallbackQuery, state: FSMCont
 
     await state.set_state(FeedbackStates.waiting_for_admin_response)
 
+
 # Обработка остальных кнопок администратора
-@dp.callback_query(lambda c: c.data.startswith("reply_") or c.data.startswith("admin_close_") or c.data.startswith("history_"))
+@dp.callback_query(
+    lambda c: c.data.startswith("reply_") or c.data.startswith("admin_close_") or c.data.startswith("history_"))
 async def process_reply_callback(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("У вас нет прав для этого действия.", show_alert=True)
@@ -238,44 +247,48 @@ async def process_reply_callback(callback: types.CallbackQuery, state: FSMContex
     if action == "reply":
         if ticket_data[ticket_id]["assigned_admin"] != admin_id:
             await callback.answer("Этот тикет ведет другой администратор.", show_alert=True)
-            return
-        await state.update_data(ticket_id=ticket_id)
-        await callback.message.reply("✍️ Напишите ваш ответ пользователю:")
-        await state.set_state(FeedbackStates.waiting_for_admin_response)
-    elif action == "admin_close":
-        user_id = ticket_data[ticket_id]["user_id"]
-        if ticket_id in ADMIN_SETTINGS[admin_id]["ticket_history"]:
-            ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["status"] = "закрыт администратором"
-        if ticket_id in ticket_queue:
-            ticket_queue.remove(ticket_id)
-        del ticket_data[ticket_id]
-        back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
-        ])
-        await callback.message.reply(f"✅ Тикет #{ticket_id} закрыт вами.")
-        try:
-            await bot.send_message(
-                chat_id=user_id,
-                text=f"ℹ️ Тикет #{ticket_id} был закрыт администратором.",
-                reply_markup=back_keyboard
-            )
-        except Exception as e:
-            logger.error(f"Ошибка уведомления пользователя о закрытии тикета #{ticket_id}: {e}")
-    elif action == "history":
-        if ticket_id not in ADMIN_SETTINGS[admin_id]["ticket_history"]:
-            await callback.message.reply("⚠️ У вас нет истории для этого тикета.")
-            return
-        history = ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]
-        history_text = f"📜 *История тикета #{ticket_id}*\n\n"
-        history_text += f"👨‍💼 Администратор: {ADMIN_IDS[admin_id]}\n"
-        history_text += f"📌 Статус: {history['status']}\n\n"
-        history_text += "Сообщения:\n"
-        for msg, sender, timestamp in history["messages"]:
-            history_text += f"[{timestamp}] {sender}: {msg}\n"
-        back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
-        ])
-        await callback.message.reply(history_text, parse_mode="Markdown", reply_markup=back_keyboard)
+
+
+economy
+return
+await state.update_data(ticket_id=ticket_id)
+await callback.message.reply("✍️ Напишите ваш ответ пользователю:")
+await state.set_state(FeedbackStates.waiting_for_admin_response)
+elif action == "admin_close":
+user_id = ticket_data[ticket_id]["user_id"]
+if ticket_id in ADMIN_SETTINGS[admin_id]["ticket_history"]:
+    ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["status"] = "закрыт администратором"
+if ticket_id in ticket_queue:
+    ticket_queue.remove(ticket_id)
+del ticket_data[ticket_id]
+back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
+])
+await callback.message.reply(f"✅ Тикет #{ticket_id} закрыт вами.")
+try:
+    await bot.send_message(
+        chat_id=user_id,
+        text=f"ℹ️ Тикет #{ticket_id} был закрыт администратором.",
+        reply_markup=back_keyboard
+    )
+except Exception as e:
+    logger.error(f"Ошибка уведомления пользователя о закрытии тикета #{ticket_id}: {e}")
+elif action == "history":
+if ticket_id not in ADMIN_SETTINGS[admin_id]["ticket_history"]:
+    await callback.message.reply("⚠️ У вас нет истории для этого тикета.")
+    return
+history = ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]
+history_text = f"📜 *История тикета #{ticket_id}*\n\n"
+history_text += f"👨‍💼 Администратор: {ADMIN_IDS[admin_id]}\n"
+history_text += f"📌 Статус: {history['status']}\n\n"
+history_text += "Сообщения:\n"
+for msg, sender, timestamp in history["messages"]:
+    history_text += f"[{timestamp}] {sender}: {msg}\n"
+back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
+])
+await callback.message.reply(history_text, parse_mode="Markdown", reply_markup=back_keyboard)
+
 
 # Обработка ответа администратора
 @dp.message(lambda message: message.from_user.id in ADMIN_IDS)
@@ -294,7 +307,8 @@ async def admin_reply(message: types.Message, state: FSMContext):
     ticket = ticket_data[ticket_id]
     user_id = ticket["user_id"]
     admin_response = message.text
-    ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["messages"].append((admin_response, f"админ {ADMIN_IDS[admin_id]}", datetime.now()))
+    ADMIN_SETTINGS[admin_id]["ticket_history"][ticket_id]["messages"].append(
+        (admin_response, f"админ {ADMIN_IDS[admin_id]}", datetime.now()))
 
     try:
         continue_keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -311,6 +325,7 @@ async def admin_reply(message: types.Message, state: FSMContext):
         await message.reply(f"✅ Ответ на тикет #{ticket_id} отправлен пользователю!")
     except Exception as e:
         await message.reply(f"⚠️ Ошибка отправки ответа пользователю: {e}")
+
 
 # Обработка кнопки "Продолжить диалог" или "Закрыть тикет" пользователем
 @dp.callback_query(lambda c: c.data.startswith("continue_") or c.data.startswith("close_"))
@@ -348,6 +363,7 @@ async def process_dialog_options(callback: types.CallbackQuery, state: FSMContex
                 [InlineKeyboardButton(text="⬅️ Назад", callback_data="home")]
             ])
             await callback.message.edit_text("⚠️ Тикет уже закрыт или не существует.", reply_markup=back_keyboard)
+
 
 # Обработка продолжения диалога
 @dp.message(FeedbackStates.continuing_dialog)
@@ -410,13 +426,27 @@ async def handle_continue_dialog(message: types.Message, state: FSMContext):
 
     asyncio.create_task(auto_close_ticket(ticket_id))
 
+
 # Команда для проверки Telegram ID
 @dp.message(Command("id"))
 async def get_id(message: types.Message):
     await message.reply(f"Ваш Telegram ID: {message.from_user.id}")
 
-# Настройка Webhook с дополнительным логированием
-async def on_startup(dispatcher: Dispatcher):
+
+# Обработчик корневого пути для Render
+async def handle_root(request):
+    return web.Response(text="Telegram Feedback Bot is running!")
+
+
+# Обработчик Webhook
+async def handle_webhook(request):
+    update = await request.json()
+    await dp.feed_update(bot, types.Update(**update))
+    return web.Response()
+
+
+# Настройка Webhook
+async def on_startup(_):
     webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"
     try:
         await bot.set_webhook(url=webhook_url)
@@ -424,7 +454,8 @@ async def on_startup(dispatcher: Dispatcher):
     except Exception as e:
         logger.error(f"Ошибка при установке Webhook: {e}")
 
-async def on_shutdown(dispatcher: Dispatcher):
+
+async def on_shutdown(_):
     try:
         await bot.delete_webhook()
         logger.info("Webhook успешно удален")
@@ -436,18 +467,32 @@ async def on_shutdown(dispatcher: Dispatcher):
     except Exception as e:
         logger.error(f"Ошибка при закрытии сессии бота: {e}")
 
+
 # Запуск приложения
-def main():
+async def main():
     app = web.Application()
-    # Регистрируем обработчик Webhook
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=f"/webhook/{TOKEN}")
-    setup_application(app, dp, bot=bot)
-    # Регистрируем функции startup и shutdown
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
-    # Запускаем веб-сервер на порту 8080
-    web.run_app(app, host="0.0.0.0", port=8080)
+
+    # Добавляем обработчик корневого пути
+    app.router.add_get('/', handle_root)
+    app.router.add_head('/', handle_root)  # Добавляем поддержку HEAD-запросов
+
+    # Настраиваем Webhook
+    app.router.add_post(f"/webhook/{TOKEN}", handle_webhook)
+
+    # Регистрируем startup и shutdown
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    # Запускаем приложение
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+
+    # Держим приложение запущенным
+    await asyncio.Event().wait()
+
 
 if __name__ == "__main__":
     logger.info("Запуск бота...")
-    main()
+    asyncio.run(main())
