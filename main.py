@@ -432,13 +432,20 @@ async def get_id(message: types.Message) -> None:
 
 # Обработчик корневого пути для Render
 async def handle_root(request: web.Request) -> web.Response:
+    logger.info(f"Получен запрос на корневой путь: {request.method} {request.path}")
     return web.Response(text="Telegram Feedback Bot is running!")
 
 
 # Обработчик Webhook
 async def handle_webhook(request: web.Request) -> web.Response:
-    update = await request.json()
-    await dp.feed_update(bot, types.Update(**update))
+    logger.info(f"Получен Webhook запрос: {request.method} {request.path}")
+    try:
+        update = await request.json()
+        logger.debug(f"Получено обновление от Telegram: {update}")
+        await dp.feed_update(bot, types.Update(**update))
+        logger.info("Обновление успешно обработано")
+    except Exception as exc:
+        logger.error(f"Ошибка при обработке Webhook: {exc}")
     return web.Response()
 
 
@@ -446,6 +453,11 @@ async def handle_webhook(request: web.Request) -> web.Response:
 async def on_startup(_: web.Application) -> None:
     webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"
     try:
+        # Проверяем текущий Webhook
+        webhook_info = await bot.get_webhook_info()
+        logger.info(f"Текущая информация о Webhook: {webhook_info}")
+
+        # Устанавливаем Webhook
         await bot.set_webhook(url=webhook_url)
         logger.info(f"Webhook успешно установлен: {webhook_url}")
     except Exception as exc:
