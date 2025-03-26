@@ -8,7 +8,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiohttp import web
 
 # Токен бота
 TOKEN = "7712233610:AAG-M040klfJ8QOscBEjT8pBHqus4J58BuI"
@@ -430,75 +429,20 @@ async def get_id(message: types.Message) -> None:
     await message.reply(f"Ваш Telegram ID: {message.from_user.id}")
 
 
-# Обработчик корневого пути для Render
-async def handle_root(request: web.Request) -> web.Response:
-    logger.info(f"Получен запрос на корневой путь: {request.method} {request.path}")
-    return web.Response(text="Telegram Feedback Bot is running!")
-
-
-# Обработчик Webhook
-async def handle_webhook(request: web.Request) -> web.Response:
-    logger.info(f"Получен Webhook запрос: {request.method} {request.path}")
+# Запуск приложения с polling
+async def main() -> None:
     try:
-        update = await request.json()
-        logger.debug(f"Получено обновление от Telegram: {update}")
-        await dp.feed_update(bot, types.Update(**update))
-        logger.info("Обновление успешно обработано")
-    except Exception as exc:
-        logger.error(f"Ошибка при обработке Webhook: {exc}")
-    return web.Response()
-
-
-# Настройка Webhook
-async def on_startup(_: web.Application) -> None:
-    webhook_url = f"https://telegram-feedback-bot.onrender.com/webhook/{TOKEN}"
-    try:
-        # Проверяем текущий Webhook
-        webhook_info = await bot.get_webhook_info()
-        logger.info(f"Текущая информация о Webhook: {webhook_info}")
-
-        # Устанавливаем Webhook
-        await bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook успешно установлен: {webhook_url}")
-    except Exception as exc:
-        logger.error(f"Ошибка при установке Webhook: {exc}")
-
-
-async def on_shutdown(_: web.Application) -> None:
-    try:
+        # Удаляем Webhook, если он был установлен ранее
         await bot.delete_webhook()
-        logger.info("Webhook успешно удален")
+        logger.info("Webhook удален, переключаемся на polling")
+
+        # Запускаем polling
+        await dp.start_polling(bot)
     except Exception as exc:
-        logger.error(f"Ошибка при удалении Webhook: {exc}")
-    try:
+        logger.error(f"Ошибка при запуске polling: {exc}")
+    finally:
         await bot.session.close()
         logger.info("Сессия бота закрыта")
-    except Exception as exc:
-        logger.error(f"Ошибка при закрытии сессии бота: {exc}")
-
-
-# Запуск приложения
-async def main() -> None:
-    app = web.Application()
-
-    # Добавляем обработчик корневого пути
-    app.router.add_get('/', handle_root)  # Обрабатывает как GET, так и HEAD запросы
-
-    # Настраиваем Webhook
-    app.router.add_post(f"/webhook/{TOKEN}", handle_webhook)
-
-    # Регистрируем startup и shutdown
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-
-    # Запускаем приложение
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-
-    # Держим приложение запущенным
-    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
